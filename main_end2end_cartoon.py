@@ -26,15 +26,21 @@ DEMO_CH = 'danbooru1'
 parser = argparse.ArgumentParser()
 parser.add_argument('--jpg', type=str, default=DEMO_CH)
 
-parser.add_argument('--load_AUTOVC_name', type=str, default='examples/ckpt/ckpt_autovc.pth')
-parser.add_argument('--load_a2l_G_name', type=str, default='examples/ckpt/ckpt_speaker_branch.pth') #ckpt_audio2landmark_g.pth') #
-parser.add_argument('--load_a2l_C_name', type=str, default='examples/ckpt/ckpt_content_branch.pth') #ckpt_audio2landmark_c.pth')
-parser.add_argument('--load_G_name', type=str, default='examples/ckpt/ckpt_116_i2i_comb.pth') #ckpt_i2i_finetune_150.pth') #ckpt_image2image.pth') #
+parser.add_argument('--load_AUTOVC_name', type=str,
+                    default='examples/ckpt/ckpt_autovc.pth')
+parser.add_argument('--load_a2l_G_name', type=str,
+                    default='examples/ckpt/ckpt_speaker_branch.pth')  #ckpt_audio2landmark_g.pth') #
+parser.add_argument('--load_a2l_C_name', type=str,
+                    default='examples/ckpt/ckpt_content_branch.pth') #ckpt_audio2landmark_c.pth')
+parser.add_argument('--load_G_name', type=str,
+                    default='examples/ckpt/ckpt_116_i2i_comb.pth') #ckpt_i2i_finetune_150.pth') #ckpt_image2image.pth') #
 
 parser.add_argument('--amp_lip_x', type=float, default=2.0)
 parser.add_argument('--amp_lip_y', type=float, default=2.0)
 parser.add_argument('--amp_pos', type=float, default=0.8)
-parser.add_argument('--reuse_train_emb_list', default=['45hn7-LXDX8']) #  ['E_kmpT-EfOg']) #  ['E_kmpT-EfOg']) # ['45hn7-LXDX8'])
+parser.add_argument('--reuse_train_emb_list', default=['45hn7-LXDX8']) 
+# other options
+#  ['E_kmpT-EfOg']) #  ['E_kmpT-EfOg']) # ['45hn7-LXDX8'])
 
 
 parser.add_argument('--add_audio_in', default=False, action='store_true')
@@ -54,12 +60,14 @@ parser.add_argument('--init_content_encoder', type=str, default='')
 parser.add_argument('--lr', type=float, default=1e-3, help='learning rate')
 parser.add_argument('--reg_lr', type=float, default=1e-6, help='weight decay')
 parser.add_argument('--write', default=False, action='store_true')
+parser.add_argument('--use_wine', default=False, action="store_true")
 parser.add_argument('--segment_batch_size', type=int, default=512, help='batch size')
 parser.add_argument('--emb_coef', default=3.0, type=float)
 parser.add_argument('--lambda_laplacian_smooth_loss', default=1.0, type=float)
 parser.add_argument('--use_11spk_only', default=False, action='store_true')
 
 opt_parser = parser.parse_args()
+# import pdb; pdb.set_trace()
 
 DEMO_CH = opt_parser.jpg
 
@@ -74,9 +82,11 @@ for ain in ains:
     shutil.copyfile('examples/tmp.wav', 'examples/{}'.format(ain))
     print('Processing audio file', ain)
     c = AutoVC_mel_Convertor('examples')
-    au_data_i = c.convert_single_wav_to_autovc_input(audio_filename=os.path.join('examples', ain),
-           autovc_model_path=opt_parser.load_AUTOVC_name)
-    au_data += au_data_i
+    au_data_i = \
+        c.convert_single_wav_to_autovc_input(
+            audio_filename=os.path.join('examples', ain),
+            autovc_model_path=opt_parser.load_AUTOVC_name)
+    au_data += au_data_i # append au_data to list
     # os.remove(os.path.join('examples', 'tmp.wav'))
 if(os.path.isfile('examples/tmp.wav')):
     os.remove('examples/tmp.wav')
@@ -91,6 +101,8 @@ for au, info in au_data:
     rot_quat.append(np.zeros(shape=(au_length, 4)))
     anchor_t_shape.append(np.zeros(shape=(au_length, 68 * 3)))
 
+
+# remove previous pickles in examples/dump/
 if(os.path.exists(os.path.join('examples', 'dump', 'random_val_fl.pickle'))):
     os.remove(os.path.join('examples', 'dump', 'random_val_fl.pickle'))
 if(os.path.exists(os.path.join('examples', 'dump', 'random_val_fl_interp.pickle'))):
@@ -100,6 +112,7 @@ if(os.path.exists(os.path.join('examples', 'dump', 'random_val_au.pickle'))):
 if (os.path.exists(os.path.join('examples', 'dump', 'random_val_gaze.pickle'))):
     os.remove(os.path.join('examples', 'dump', 'random_val_gaze.pickle'))
 
+# store the new pickles in examples/dump
 with open(os.path.join('examples', 'dump', 'random_val_fl.pickle'), 'wb') as fp:
     pickle.dump(fl_data, fp)
 with open(os.path.join('examples', 'dump', 'random_val_au.pickle'), 'wb') as fp:
@@ -111,14 +124,17 @@ with open(os.path.join('examples', 'dump', 'random_val_gaze.pickle'), 'wb') as f
 
 ''' STEP 4: RUN audio->landmark network'''
 from src.approaches.train_audio2landmark import Audio2landmark_model
+print('Running Audio to Landmark model')
 model = Audio2landmark_model(opt_parser, jpg_shape=shape_3d)
 model.test()
 print('finish gen fls')
 
 ''' STEP 5: de-normalize the output to the original image scale '''
+print("Entering Stage 5 of de-normalization of the output to the original image scale")
 fls_names = glob.glob1('examples_cartoon', 'pred_fls_*.txt')
 fls_names.sort()
 
+import pdb; pdb.set_trace()
 for i in range(0,len(fls_names)):
     ains = glob.glob1('examples', '*.wav')
     ains.sort()
@@ -127,6 +143,7 @@ for i in range(0,len(fls_names)):
     output_dir = os.path.join('examples_cartoon', fls_names[i][:-4])
     try:
         os.makedirs(output_dir)
+        print("succesfully created the directory")
     except:
         pass
 
@@ -175,28 +192,64 @@ for i in range(0,len(fls_names)):
                 os.path.join(output_dir, 'triangulation.txt'))
 
     os.remove(os.path.join('examples_cartoon', fls_names[i]))
+    # import pdb; pdb.set_trace()
+    # if opt_parser.use_wine:
+    print("ENtering wineeeeeee")
+    # ==============================================
+    # Step 4 : Vector art morphing (only work in WINDOWS) [OLD]
+    # Step 4 : Vector art morphing works in ubuntu via wine (?) [NEW]
+    # ==============================================
+    print("---Using wine---")
+    warp_exe = os.path.join(os.getcwd(), 'facewarp', 'facewarp.exe')
+    if (os.path.exists(os.path.join(output_dir, 'output'))):
+        shutil.rmtree(os.path.join(output_dir, 'output'))
+    os.mkdir(os.path.join(output_dir, 'output'))
+    os.chdir('{}'.format(os.path.join(output_dir, 'output')))
+    print(f"The pwd is {os.getcwd()}")
 
-    # # ==============================================
-    # # Step 4 : Vector art morphing (only work in WINDOWS)
-    # # ==============================================
-    # warp_exe = os.path.join(os.getcwd(), 'facewarp', 'facewarp.exe')
-    # import os
-    #
-    # if (os.path.exists(os.path.join(output_dir, 'output'))):
-    #     shutil.rmtree(os.path.join(output_dir, 'output'))
-    # os.mkdir(os.path.join(output_dir, 'output'))
-    # os.chdir('{}'.format(os.path.join(output_dir, 'output')))
-    # print(os.getcwd())
-    #
-    # os.system('{} {} {} {} {} {}'.format(
-    #     warp_exe,
-    #     os.path.join('examples_cartoon', DEMO_CH+'.png'),
-    #     os.path.join(output_dir, 'triangulation.txt'),
-    #     os.path.join(output_dir, 'reference_points.txt'),
-    #     os.path.join(output_dir, 'warped_points.txt'),
-    #     # os.path.join(ROOT_DIR, 'puppets', sys.argv[6]),
-    #     '-novsync -dump'))
+    ##########################################################
+    print("Path at terminal when executing this file")
+    print(os.getcwd() + "\n")
+
+    print("This file path, relative to os.getcwd()")
+    print(__file__ + "\n")
+
+    print("This file full path (following symlinks)")
+    full_path = os.path.realpath(__file__)
+    print(full_path + "\n")
+
+    print("This file directory and name")
+    path, filename = os.path.split(full_path)
+    print(path + ' --> ' + filename + "\n")
+
+    print("This file directory only")
+    print(os.path.dirname(full_path))
+    ##########################################################
+
+    namename = "MAKIS"
+    os.chdir("../../../")
+
+    print(f"The pwd is {os.getcwd()}")
+    # import pdb; pdb.set_trace()
+    os.system('{} {} {} {} {} {} {} {}'.format(
+        'wine',
+        warp_exe,
+        os.path.join('examples_cartoon', DEMO_CH+'.png'),
+        os.path.join(output_dir, 'triangulation.txt'),
+        os.path.join(output_dir, 'reference_points.txt'),
+        os.path.join(output_dir, 'warped_points.txt'),
+        '-novsync',
+        '-dump'))
+        # os.path.join(ROOT_DIR, 'puppets', sys.argv[6]),
+    
     # os.system('ffmpeg -y -r 62.5 -f image2 -i "%06d.tga" -i {} -shortest {}'.format(
     #     ain,
     #     os.path.join(output_dir, sys.argv[8])
     # ))
+    os.chdir('{}'.format(os.path.join(output_dir, 'output')))
+    print(f"The pwd is {os.getcwd()}")
+    import pdb; pdb.set_trace()
+    os.system('ffmpeg -y -r 62.5 -f image2 -i "%06d.tga" -i {} -shortest {}'.format(
+            ain,
+            os.path.join(output_dir, namename)
+        ))
