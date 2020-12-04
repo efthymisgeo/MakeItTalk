@@ -69,6 +69,7 @@ class Vis():
         '''
         Visualize landmark on images.
         '''
+        print(f"image with shape {shape}")
         def draw_curve(idx_list, color=(0, 255, 0), loop=False, lineWidth=linewidth):
             for i in idx_list:
                 cv2.line(img, (shape[i, 0], shape[i, 1]), (shape[i + 1, 0], shape[i + 1, 1]), color, lineWidth)
