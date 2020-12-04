@@ -39,15 +39,8 @@ parser.add_argument('--load_G_name', type=str,
 
 parser.add_argument('--amp_lip_x', type=float, default=2.0)
 parser.add_argument('--amp_lip_y', type=float, default=2.0)
-<<<<<<< HEAD
-parser.add_argument('--amp_pos', type=float, default=0.8)
-parser.add_argument('--reuse_train_emb_list', default=['45hn7-LXDX8']) 
-# other options
-#  ['E_kmpT-EfOg']) #  ['E_kmpT-EfOg']) # ['45hn7-LXDX8'])
-=======
 parser.add_argument('--amp_pos', type=float, default=0.5)
 parser.add_argument('--reuse_train_emb_list', type=str, nargs='+', default=[]) #  ['E_kmpT-EfOg']) #  ['E_kmpT-EfOg']) # ['45hn7-LXDX8'])
->>>>>>> 5ba9815532ef818c1ef0ba92b03d098964e70074
 
 
 parser.add_argument('--add_audio_in', default=False, action='store_true')
@@ -210,17 +203,6 @@ for i in range(0,len(fls_names)):
                 os.path.join(output_dir, 'triangulation.txt'))
 
     os.remove(os.path.join('examples_cartoon', fls_names[i]))
-<<<<<<< HEAD
-    # import pdb; pdb.set_trace()
-    # if opt_parser.use_wine:
-    print("ENtering wineeeeeee")
-    # ==============================================
-    # Step 4 : Vector art morphing (only work in WINDOWS) [OLD]
-    # Step 4 : Vector art morphing works in ubuntu via wine (?) [NEW]
-    # ==============================================
-    print("---Using wine---")
-    warp_exe = os.path.join(os.getcwd(), 'facewarp', 'facewarp.exe')
-=======
 
     # ==============================================
     # Step 4 : Vector art morphing (only work in WINDOWS)
@@ -228,61 +210,10 @@ for i in range(0,len(fls_names)):
     warp_exe = os.path.join(os.getcwd(), 'facewarp', 'facewarp.exe')
     import os
     
->>>>>>> 5ba9815532ef818c1ef0ba92b03d098964e70074
     if (os.path.exists(os.path.join(output_dir, 'output'))):
         shutil.rmtree(os.path.join(output_dir, 'output'))
     os.mkdir(os.path.join(output_dir, 'output'))
     os.chdir('{}'.format(os.path.join(output_dir, 'output')))
-<<<<<<< HEAD
-    print(f"The pwd is {os.getcwd()}")
-
-    ##########################################################
-    print("Path at terminal when executing this file")
-    print(os.getcwd() + "\n")
-
-    print("This file path, relative to os.getcwd()")
-    print(__file__ + "\n")
-
-    print("This file full path (following symlinks)")
-    full_path = os.path.realpath(__file__)
-    print(full_path + "\n")
-
-    print("This file directory and name")
-    path, filename = os.path.split(full_path)
-    print(path + ' --> ' + filename + "\n")
-
-    print("This file directory only")
-    print(os.path.dirname(full_path))
-    ##########################################################
-
-    namename = "MAKIS"
-    os.chdir("../../../")
-
-    print(f"The pwd is {os.getcwd()}")
-    # import pdb; pdb.set_trace()
-    os.system('{} {} {} {} {} {} {} {}'.format(
-        'wine',
-        warp_exe,
-        os.path.join('examples_cartoon', DEMO_CH+'.png'),
-        os.path.join(output_dir, 'triangulation.txt'),
-        os.path.join(output_dir, 'reference_points.txt'),
-        os.path.join(output_dir, 'warped_points.txt'),
-        '-novsync',
-        '-dump'))
-        # os.path.join(ROOT_DIR, 'puppets', sys.argv[6]),
-    
-    # os.system('ffmpeg -y -r 62.5 -f image2 -i "%06d.tga" -i {} -shortest {}'.format(
-    #     ain,
-    #     os.path.join(output_dir, sys.argv[8])
-    # ))
-    os.chdir('{}'.format(os.path.join(output_dir, 'output')))
-    print(f"The pwd is {os.getcwd()}")
-    import pdb; pdb.set_trace()
-    os.system('ffmpeg -y -r 62.5 -f image2 -i "%06d.tga" -i {} -shortest {}'.format(
-            ain,
-            os.path.join(output_dir, namename)
-        ))
-=======
     cur_dir = os.getcwd()
     print(cur_dir)
     
@@ -298,4 +229,3 @@ for i in range(0,len(fls_names)):
         os.path.join(cur_dir, '..', '..', '..', 'examples', ain),
         os.path.join(cur_dir, '..', 'out.mp4')
     ))
->>>>>>> 5ba9815532ef818c1ef0ba92b03d098964e70074
