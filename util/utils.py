@@ -14,6 +14,55 @@ import os
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
+import skimage
+import skimage.transform
+from tqdm import tqdm
+from scipy.ndimage import map_coordinates
+from skimage.transform._geometric import GeometricTransform
+from skimage.transform import warp, warp_coords, AffineTransform
+# from skimage.transform import PiecewiseAffineTransform, warp, warp_coords, AffineTransform
+from scipy.optimize import linprog
+from scipy.spatial import Delaunay, ConvexHull
+
+
+def check_directory_and_create(dir_path, exists_warning=False):
+    """
+    Checks if the path specified is a directory or creates it if it doesn't
+    exist.
+    
+    Args:
+        dir_path (string): directory path to check/create
+    
+    Returns:
+        (string): the input path
+    """
+    if os.path.exists(dir_path):
+        if not os.path.isdir(dir_path):
+            raise ValueError(f"Given path {dir_path} is not a directory")
+        elif exists_warning:
+            print(f"WARNING: Already existing experiment folder {dir_path}."
+                  "It is recommended to change experiment_id in "
+                  "configs/exp_config.json file. Proceeding by overwriting")
+    else:
+        os.mkdir(dir_path)
+    return os.path.abspath(dir_path)
+    
+
+def in_hull(points, x):
+    """
+    Function which checks if a given set of points 'points' belongs in the
+    convex hull defined by the vertices 'x'
+    Args:
+        points (n_points, dim): np.ndarray
+        x (dim): np.ndarrady
+    """
+    n_points = len(points)
+    n_dim = len(x)
+    c = np.zeros(n_points)
+    A = np.r_[points.T,np.ones((1,n_points))]
+    b = np.r_[x, np.ones(1)]
+    lp = linprog(c, A_eq=A, b_eq=b)
+    return lp.success
 
 class Point:
     def __init__(self, x, y):
@@ -388,3 +437,465 @@ def add_naive_eye(fl):
             interp_fl(t0, t, t + K2, r=(t + K2 - 1 - t0) / 1. / K2)
 
     return fl
+
+
+def read_line(line, dtype=float):
+    """
+    Function which reads a line separated by ' ' e.g '12 24 46' and returns
+    a list as [12, 24, 46]
+    """
+    return list(map(dtype, line.split(' ')))
+
+
+def list2array(list):
+    return np.asarray(list)
+
+
+def read_txt(txt_path, dtype):
+    txt_lines = []
+    with open(txt_path, "r") as fd:
+        # lines = fd.read()
+        for line in fd:
+            print(line)
+            txt_lines.append(list2array(read_line(line, dtype)))
+    return txt_lines
+
+
+def _merge_images(img_top, img_bottom, mask=0):
+    """
+    Function to combine two images with mask by replacing all pixels
+    of img_bottom which equals to mask by pixels from img_top.
+
+    script from
+    https://github.com/marsbroshok/face-replace/blob/master/faceWarp.py
+
+    :param img_top: greyscale image which will replace masked pixels
+    :param img_bottom: greyscale image which pixels will be replaced
+    :param mask: pixel value to be used as mask (int)
+    :return: combined greyscale image
+    """
+    img_top = skimage.img_as_ubyte(img_top)
+    img_bottom = skimage.img_as_ubyte(img_bottom)
+    merge_layer = img_top == mask
+    img_top[merge_layer] = img_bottom[merge_layer]
+    return img_top
+
+
+def face_warp(src_face,
+              src_face_lm,
+              dst_face_lm,
+              bg,
+              warp_only=False,
+              use_bg=True):
+    """
+    Function takes two faces and landmarks and warp one face around another
+    according to the face landmarks.
+
+    script modified from
+    https://github.com/marsbroshok/face-replace/blob/master/faceWarp.py
+
+
+    :param src_face: grayscale (?) image (np.array of int) of face
+        which will warped around second face
+    :param src_face_lm: landmarks for the src_face
+    :param dst_face: predicted image landmarks (np.array of int) which will
+        be replaced by src_face.
+    :param bg: image background
+    :return: image with warped face
+    """
+    # Helpers
+    output_shape = src_face.shape[:2]  # dimensions of our final image (from webcam eg)
+
+    # Get the landmarks/parts for the face.
+    # try:
+    # dst_face_lm = find_landmarks(dst_face, predictor, opencv_facedetector=False)
+    # src_face_coord = _shape_to_array(src_face_lm)
+    # dst_face_coord = _shape_to_array(dst_face_lm) + 10 * np.random.rand(68, 2)
+
+    # dst_face_lm = find_landmarks(dst_face, predictor, opencv_facedetector=False)
+    src_face_coord = src_face_lm
+    dst_face_coord = dst_face_lm
+
+    warp_trans = PiecewiseAffineTransform()
+    # warp_trans.estimate(dst_face_coord, src_face_coord)
+    # might be buggy here and need src_face, dst_face instead !!!!!
+    # warp_trans.estimate(dst_face_coord, src_face_coord)
+    warp_trans.estimate(src_face_coord, dst_face_coord)
+    warped_face = skimage.transform.warp(src_face,
+                                         warp_trans) #, output_shape=output_shape)
+    # except:
+    #     warped_face = dst_face
+
+    # Merge two images: new warped face and background of dst image
+    # through using a mask (pixel level value is 0)
+
+    # this might need to be investigated too!!!!
+    if not warp_only:
+        if use_bg:
+            warped_face = _merge_images(warped_face, bg)
+        else:
+            warped_face = _merge_images(warped_face, src_face)
+    return warped_face
+
+
+def face_warp_coord(src_face,
+                    src_face_lm,
+                    dst_face_lm,
+                    tri,
+                    bg,
+                    warp_only=False,
+                    use_bg=True):
+    """
+    Function takes two faces and landmarks and warp one face around another
+    according to the face landmarks.
+
+    script modified from
+    https://github.com/marsbroshok/face-replace/blob/master/faceWarp.py
+
+
+    :param src_face: grayscale (?) image (np.array of int) of face
+        which will warped around second face
+    :param src_face_lm: landmarks for the src_face
+    :param dst_face: predicted image landmarks (np.array of int) which will
+        be replaced by src_face.
+    :param bg: image background
+    :return: image with warped face
+    """
+    src_face_coord = src_face_lm
+    dst_face_coord = dst_face_lm
+
+    affines = []
+    # find affine mapping from source positions to destination
+    for k in tri:
+        affine = AffineTransform()
+        affine.estimate(src_face_coord[k, :], dst_face_coord[k, :])
+        affines.append(affine)
+
+    inverse_affines = []
+    # find the inverse affine mapping
+    for k in tri:
+        affine = AffineTransform()
+        affine.estimate(dst_face_coord[k, :], src_face_coord[k, :])
+        inverse_affines.append(affine)
+    
+
+
+    coords = warp_coords(coord_map, src_face.shape)
+    warped_face = map_coordinates(src_face, coords)
+    if not warp_only:
+        if use_bg:
+            warped_face = _merge_images(warped_face, bg)
+        else:
+            warped_face = _merge_images(warped_face, src_face)
+    return warped_face
+
+
+class PiecewiseAffineTransformTriang(GeometricTransform):
+    """2D piecewise affine transformation based on given triangulation.
+    Control points are used to define the mapping. The transform is based on
+    a Delaunay triangulation of the points to form a mesh. Each triangle is
+    used to find a local affine transform.
+    Attributes
+    ----------
+    affines : list of AffineTransform objects
+        Affine transformations for each triangle in the mesh.
+    inverse_affines : list of AffineTransform objects
+        Inverse affine transformations for each triangle in the mesh.
+    """
+
+    def __init__(self, hulls, simplex, reshape=False):
+        self._tesselation = None
+        self._inverse_tesselation = None
+        self.affines = None
+        self.inverse_affines = None
+        # originally simplex has size MxN but reshape to M*N
+        self.simplex = simplex
+        if reshape:
+            self.simplex = simplex.reshape(-1,)
+        self.hulls = hulls
+
+    def estimate(self, src, dst, delaunay):
+        """Estimate the transformation from a set of corresponding points.
+        Number of source and destination coordinates must match.
+        Parameters
+        ----------
+        src : (N, 2) array
+            Source coordinates.
+        dst : (N, 2) array
+            Destination coordinates.
+        delaunay : (*, 3) array.
+            The given triangulation
+        Returns
+        -------
+        success : bool
+            True, if model estimation succeeds.
+        """
+
+        # forward piecewise affine for a given triangulation 
+        self._tesselation = delaunay
+
+        # import pdb; pdb.set_trace()
+        # find affine mapping from source positions to destination
+        self.affines = []
+        for tri in self._tesselation:
+            print(tri)
+            print(src[tri], dst[tri])
+            affine = AffineTransform()
+            affine.estimate(src[tri], dst[tri])
+            self.affines.append(affine)
+        # import pdb; pdb.set_trace()
+        # inverse piecewise affine
+        # keep the same trianglulation
+        # find affine mapping from source positions to destination
+        self._inverse_tesselation = delaunay
+        self.inverse_affines = []
+        for tri in self._inverse_tesselation:
+            affine = AffineTransform()
+            affine.estimate(dst[tri], src[tri])
+            self.inverse_affines.append(affine)
+
+        return True
+
+    def __call__(self, coords):
+        """Apply forward transformation.
+        Coordinates outside of the mesh will be set to `- 1`.
+        Parameters
+        ----------
+        coords : (N, 2) array
+            Source coordinates.
+        Returns
+        -------
+        coords : (N, 2) array
+            Transformed coordinates.
+        """
+
+        out = np.empty_like(coords, np.double)
+
+        # determine triangle index for each coordinate
+        # import pdb; pdb.set_trace()
+        coords = coords.astype(int)
+        simplex = self.simplex
+
+        # coordinates outside of mesh
+        out[simplex == -1, :] = -1
+
+        for index in range(len(self.hulls)):
+            # affine transform for triangle - convex hull
+            affine = self.affines[index]
+            # all coordinates within triangle - convex hull
+            index_mask = simplex == index
+
+            out[index_mask, :] = affine(coords[index_mask, :])
+
+        return out
+
+    def inverse(self, coords):
+        """Apply inverse transformation.
+        Coordinates outside of the mesh will be set to `- 1`.
+        Parameters
+        ----------
+        coords : (N, 2) array
+            Source coordinates.
+        Returns
+        -------
+        coords : (N, 2) array
+            Transformed coordinates.
+        """
+
+        out = np.empty_like(coords, np.double)
+
+        # determine triangle index for each coordinate
+        simplex = self.simplex
+
+        # coordinates outside of mesh
+        out[simplex == -1, :] = -1
+
+        for index in range(len(self.hulls)):
+            # affine transform for triangle
+            affine = self.inverse_affines[index]
+            # all coordinates within triangle
+            index_mask = simplex == index
+
+            out[index_mask, :] = affine(coords[index_mask, :])
+
+        return out
+
+
+def point_in_hull(point, hull, tolerance=1e-12):
+    """
+    Function which calculates the dot product between a given point and
+    the normal equations of convex hull. Tollerance is used for numerical
+    stability purposes.
+    Args:
+        point (dim,): a point with dim dimensiolaty
+        hull (scipy.ConvexHull object): convex hull
+        tollerance (float): tollerance in calculations
+    Output:
+        bool: belongs or not to the convex hull
+    """
+    return all(
+        (np.dot(eq[:-1], point) + eq[-1] <= tolerance)
+        for eq in hull.equations)
+
+
+def get_simplex(src_img, src_land, triangulation):
+    """
+    Function which maps the points of an image to a simplex
+    based on a given triangulation
+    """
+    # list of convex hulls, i.e triangles in the source image
+    hulls = []
+    for tri in triangulation:
+        hull = ConvexHull(src_land[tri, :])
+        hulls.append(hull)
+
+    print(f"constructed {len(hulls)} triangles")
+    # iterate over image to get the simplex of every point
+    rows, cols = src_img.shape[0], src_img.shape[1]
+    import pdb; pdb.set_trace()
+    simplex_matrix = np.empty((rows, cols), int)
+    for i in tqdm(range(rows)):
+        for j in range(cols):
+            pt = np.array([i, j])
+            for h_id, h in enumerate(hulls):
+                if point_in_hull(pt, h):
+                    # if h_id in [0,1,2]:
+                    #     print(f"point {i},{j} belongs to hull {h_id}")
+                    simplex_matrix[i][j] = h_id
+                    break
+
+    return hulls, simplex_matrix
+
+class PiecewiseAffineTransform(GeometricTransform):
+    """2D piecewise affine transformation.
+
+    Control points are used to define the mapping. The transform is based on
+    a Delaunay triangulation of the points to form a mesh. Each triangle is
+    used to find a local affine transform.
+
+    Attributes
+    ----------
+    affines : list of AffineTransform objects
+        Affine transformations for each triangle in the mesh.
+    inverse_affines : list of AffineTransform objects
+        Inverse affine transformations for each triangle in the mesh.
+
+    """
+
+    def __init__(self):
+        self._tesselation = None
+        self._inverse_tesselation = None
+        self.affines = None
+        self.inverse_affines = None
+
+    def estimate(self, src, dst):
+        """Estimate the transformation from a set of corresponding points.
+
+        Number of source and destination coordinates must match.
+
+        Parameters
+        ----------
+        src : (N, 2) array
+            Source coordinates.
+        dst : (N, 2) array
+            Destination coordinates.
+
+        Returns
+        -------
+        success : bool
+            True, if model estimation succeeds.
+
+        """
+
+        # forward piecewise affine
+        # triangulate input positions into mesh
+        self._tesselation = Delaunay(src)
+        # find affine mapping from source positions to destination
+        self.affines = []
+        for tri in self._tesselation.vertices:
+            affine = AffineTransform()
+            affine.estimate(src[tri, :], dst[tri, :])
+            self.affines.append(affine)
+
+        # inverse piecewise affine
+        # triangulate input positions into mesh
+        self._inverse_tesselation = Delaunay(dst)
+        # find affine mapping from source positions to destination
+        self.inverse_affines = []
+        for tri in self._inverse_tesselation.vertices:
+            affine = AffineTransform()
+            affine.estimate(dst[tri, :], src[tri, :])
+            self.inverse_affines.append(affine)
+
+        return True
+
+    def __call__(self, coords):
+        """Apply forward transformation.
+
+        Coordinates outside of the mesh will be set to `- 1`.
+
+        Parameters
+        ----------
+        coords : (N, 2) array
+            Source coordinates.
+
+        Returns
+        -------
+        coords : (N, 2) array
+            Transformed coordinates.
+
+        """
+
+        out = np.empty_like(coords, np.double)
+
+        # determine triangle index for each coordinate
+        simplex = self._tesselation.find_simplex(coords)
+        # import pdb; pdb.set_trace()
+
+        # coordinates outside of mesh
+        out[simplex == -1, :] = -1
+
+        for index in range(len(self._tesselation.vertices)):
+            # affine transform for triangle
+            affine = self.affines[index]
+            # all coordinates within triangle
+            index_mask = simplex == index
+
+            out[index_mask, :] = affine(coords[index_mask, :])
+
+        return out
+
+    def inverse(self, coords):
+        """Apply inverse transformation.
+
+        Coordinates outside of the mesh will be set to `- 1`.
+
+        Parameters
+        ----------
+        coords : (N, 2) array
+            Source coordinates.
+
+        Returns
+        -------
+        coords : (N, 2) array
+            Transformed coordinates.
+
+        """
+
+        out = np.empty_like(coords, np.double)
+
+        # determine triangle index for each coordinate
+        simplex = self._inverse_tesselation.find_simplex(coords)
+
+        # coordinates outside of mesh
+        out[simplex == -1, :] = -1
+
+        for index in range(len(self._inverse_tesselation.vertices)):
+            # affine transform for triangle
+            affine = self.inverse_affines[index]
+            # all coordinates within triangle
+            index_mask = simplex == index
+
+            out[index_mask, :] = affine(coords[index_mask, :])
+
+        return out
