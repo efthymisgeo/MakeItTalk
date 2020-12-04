@@ -44,7 +44,7 @@ def check_directory_and_create(dir_path, exists_warning=False):
                   "It is recommended to change experiment_id in "
                   "configs/exp_config.json file. Proceeding by overwriting")
     else:
-        os.mkdir(dir_path)
+        os.makedirs(dir_path)
     return os.path.abspath(dir_path)
     
 

@@ -70,7 +70,9 @@ class AutoVC_mel_Convertor():
 
         return S, mean_emb, f0_onehot
 
-    def convert_wav_to_autovc_input(self, build_train_dataset=True, autovc_model_path=r'E:\Dataset\VCTK\stargan_vc\train_85_withpre1125000_local\360000-G.ckpt'):
+    def convert_wav_to_autovc_input(self,
+                                    build_train_dataset=True,
+                                    autovc_model_path=r'E:\Dataset\VCTK\stargan_vc\train_85_withpre1125000_local\360000-G.ckpt'):
 
 
         def pad_seq(x, base=32):

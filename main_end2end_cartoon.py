@@ -9,6 +9,7 @@
 """
 
 import sys
+import json
 sys.path.append('thirdparty/AdaptiveWingLoss')
 import os, glob
 import numpy as np
@@ -16,17 +17,21 @@ import argparse
 import pickle
 from src.autovc.AutoVC_mel_Convertor_retrain_version import AutoVC_mel_Convertor
 import shutil
-
+from util.utils import check_directory_and_create
 ADD_NAIVE_EYE = False
 GEN_AUDIO = True
 GEN_FLS = True
+
+with open("puppet.json", "r") as read_file:
+    PUPPET_DICT = json.load(read_file)
 
 DEMO_CH = 'wilk.png'
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--jpg', type=str, required=True, help='Puppet image name to animate (with filename extension), e.g. wilk.png')
-parser.add_argument('--jpg_bg', type=str, required=True, help='Puppet image background (with filename extension), e.g. wilk_bg.jpg')
+# parser.add_argument('--jpg_bg', type=str, required=False, help='Puppet image background (with filename extension), e.g. wilk_bg.jpg')
 parser.add_argument('--out', type=str, default='out.mp4')
+
 
 parser.add_argument('--load_AUTOVC_name', type=str,
                     default='examples/ckpt/ckpt_autovc.pth')
@@ -40,12 +45,14 @@ parser.add_argument('--load_G_name', type=str,
 parser.add_argument('--amp_lip_x', type=float, default=2.0)
 parser.add_argument('--amp_lip_y', type=float, default=2.0)
 parser.add_argument('--amp_pos', type=float, default=0.5)
-parser.add_argument('--reuse_train_emb_list', type=str, nargs='+', default=[]) #  ['E_kmpT-EfOg']) #  ['E_kmpT-EfOg']) # ['45hn7-LXDX8'])
+parser.add_argument('--reuse_train_emb_list', type=str, nargs='+', default=[]) 
+#  ['E_kmpT-EfOg']) #  ['E_kmpT-EfOg']) # ['45hn7-LXDX8'])
 
 
 parser.add_argument('--add_audio_in', default=False, action='store_true')
 parser.add_argument('--comb_fan_awing', default=False, action='store_true')
-parser.add_argument('--output_folder', type=str, default='examples_cartoon')
+parser.add_argument('--output_folder', type=str, default='av_cartoon')
+parser.add_argument('--audio_folder', type=str, default='audio_folder')
 
 #### NEW POSE MODEL
 parser.add_argument('--test_end2end', default=True, action='store_true')
@@ -67,37 +74,42 @@ parser.add_argument('--lambda_laplacian_smooth_loss', default=1.0, type=float)
 parser.add_argument('--use_11spk_only', default=False, action='store_true')
 
 opt_parser = parser.parse_args()
-# import pdb; pdb.set_trace()
 
 DEMO_CH = opt_parser.jpg.split('.')[0]
+audio_folder = opt_parser.audio_folder
+output_folder = opt_parser.output_folder
 
-shape_3d = np.loadtxt('examples_cartoon/{}_face_close_mouth.txt'.format(DEMO_CH))
+check_directory_and_create(audio_folder)
+check_directory_and_create(output_folder)
+
+shape_3d = \
+    np.loadtxt(f'examples_cartoon/{DEMO_CH}_face_close_mouth.txt')
 
 ''' STEP 3: Generate audio data as input to audio branch '''
 au_data = []
 au_emb = []
-ains = glob.glob1('examples', '*.wav')
+ains = glob.glob1(audio_folder, '*.wav')
 ains = [item for item in ains if item is not 'tmp.wav']
 ains.sort()
 for ain in ains:
-    os.system('ffmpeg -y -loglevel error -i examples/{} -ar 16000 examples/tmp.wav'.format(ain))
-    shutil.copyfile('examples/tmp.wav', 'examples/{}'.format(ain))
+    os.system(f'ffmpeg -y -loglevel error -i {audio_folder}/{ain} -ar 16000 {audio_folder}/tmp.wav')
+    shutil.copyfile(f'{audio_folder}/tmp.wav', f'{audio_folder}/{ain}')
 
     # au embedding
     from thirdparty.resemblyer_util.speaker_emb import get_spk_emb
-    me, ae = get_spk_emb('examples/{}'.format(ain))
+    me, ae = get_spk_emb(f'{audio_folder}/{ain}')
     au_emb.append(me.reshape(-1))
 
     print('Processing audio file', ain)
-    c = AutoVC_mel_Convertor('examples')
+    c = AutoVC_mel_Convertor(audio_folder)
     au_data_i = \
         c.convert_single_wav_to_autovc_input(
-            audio_filename=os.path.join('examples', ain),
+            audio_filename=os.path.join(audio_folder, ain),
             autovc_model_path=opt_parser.load_AUTOVC_name)
     au_data += au_data_i # append au_data to list
     # os.remove(os.path.join('examples', 'tmp.wav'))
-if(os.path.isfile('examples/tmp.wav')):
-    os.remove('examples/tmp.wav')
+if(os.path.isfile(f'{audio_folder}/tmp.wav')):
+    os.remove(f'{audio_folder}/tmp.wav')
 
 fl_data = []
 rot_tran, rot_quat, anchor_t_shape = [], [], []
@@ -109,23 +121,22 @@ for au, info in au_data:
     rot_quat.append(np.zeros(shape=(au_length, 4)))
     anchor_t_shape.append(np.zeros(shape=(au_length, 68 * 3)))
 
+# remove previous pickles in audio_folfer/dump/
+if(os.path.exists(os.path.join(audio_folder, 'dump', 'random_val_fl.pickle'))):
+    os.remove(os.path.join(audio_folder, 'dump', 'random_val_fl.pickle'))
+if(os.path.exists(os.path.join(audio_folder, 'dump', 'random_val_fl_interp.pickle'))):
+    os.remove(os.path.join(audio_folder, 'dump', 'random_val_fl_interp.pickle'))
+if(os.path.exists(os.path.join(audio_folder, 'dump', 'random_val_au.pickle'))):
+    os.remove(os.path.join(audio_folder, 'dump', 'random_val_au.pickle'))
+if (os.path.exists(os.path.join(audio_folder, 'dump', 'random_val_gaze.pickle'))):
+    os.remove(os.path.join(audio_folder, 'dump', 'random_val_gaze.pickle'))
 
-# remove previous pickles in examples/dump/
-if(os.path.exists(os.path.join('examples', 'dump', 'random_val_fl.pickle'))):
-    os.remove(os.path.join('examples', 'dump', 'random_val_fl.pickle'))
-if(os.path.exists(os.path.join('examples', 'dump', 'random_val_fl_interp.pickle'))):
-    os.remove(os.path.join('examples', 'dump', 'random_val_fl_interp.pickle'))
-if(os.path.exists(os.path.join('examples', 'dump', 'random_val_au.pickle'))):
-    os.remove(os.path.join('examples', 'dump', 'random_val_au.pickle'))
-if (os.path.exists(os.path.join('examples', 'dump', 'random_val_gaze.pickle'))):
-    os.remove(os.path.join('examples', 'dump', 'random_val_gaze.pickle'))
-
-# store the new pickles in examples/dump
-with open(os.path.join('examples', 'dump', 'random_val_fl.pickle'), 'wb') as fp:
+# store the new pickles in audio_folder/dump
+with open(os.path.join(audio_folder, 'dump', 'random_val_fl.pickle'), 'wb') as fp:
     pickle.dump(fl_data, fp)
-with open(os.path.join('examples', 'dump', 'random_val_au.pickle'), 'wb') as fp:
+with open(os.path.join(audio_folder, 'dump', 'random_val_au.pickle'), 'wb') as fp:
     pickle.dump(au_data, fp)
-with open(os.path.join('examples', 'dump', 'random_val_gaze.pickle'), 'wb') as fp:
+with open(os.path.join(audio_folder, 'dump', 'random_val_gaze.pickle'), 'wb') as fp:
     gaze = {'rot_trans':rot_tran, 'rot_quat':rot_quat, 'anchor_t_shape':anchor_t_shape}
     pickle.dump(gaze, fp)
 
@@ -142,16 +153,16 @@ print('finish gen fls')
 
 ''' STEP 5: de-normalize the output to the original image scale '''
 print("Entering Stage 5 of de-normalization of the output to the original image scale")
-fls_names = glob.glob1('examples_cartoon', 'pred_fls_*.txt')
+fls_names = glob.glob1(output_folder, 'pred_fls_*.txt')
 fls_names.sort()
 
-import pdb; pdb.set_trace()
+
 for i in range(0,len(fls_names)):
-    ains = glob.glob1('examples', '*.wav')
+    ains = glob.glob1(audio_folder, '*.wav')
     ains.sort()
     ain = ains[i]
-    fl = np.loadtxt(os.path.join('examples_cartoon', fls_names[i])).reshape((-1, 68,3))
-    output_dir = os.path.join('examples_cartoon', fls_names[i][:-4])
+    fl = np.loadtxt(os.path.join(output_folder, fls_names[i])).reshape((-1, 68,3))
+    output_dir = os.path.join(output_folder, fls_names[i][:-4])
     try:
         os.makedirs(output_dir)
         print("succesfully created the directory")
@@ -202,13 +213,12 @@ for i in range(0,len(fls_names)):
     shutil.copy(os.path.join('examples_cartoon', DEMO_CH + '_delauney_tri.txt'),
                 os.path.join(output_dir, 'triangulation.txt'))
 
-    os.remove(os.path.join('examples_cartoon', fls_names[i]))
+    os.remove(os.path.join(output_folder, fls_names[i]))
 
-    # ==============================================
-    # Step 4 : Vector art morphing (only work in WINDOWS)
-    # ==============================================
+    # ===================================================
+    # Step 4 : Vector art morphing (only work in Linux)
+    # ===================================================
     warp_exe = os.path.join(os.getcwd(), 'facewarp', 'facewarp.exe')
-    import os
     
     if (os.path.exists(os.path.join(output_dir, 'output'))):
         shutil.rmtree(os.path.join(output_dir, 'output'))
@@ -217,15 +227,17 @@ for i in range(0,len(fls_names)):
     cur_dir = os.getcwd()
     print(cur_dir)
     
-    os.system('{} {} {} {} {} {}'.format(
+    import pdb; pdb.set_trace()
+    os.system('{} {} {} {} {} {} {}'.format(
+        "wine",
         warp_exe,
-        os.path.join(cur_dir, '..', '..', opt_parser.jpg),
+        os.path.join("../../../examples_cartoon", PUPPET_DICT[DEMO_CH][0]),
         os.path.join(cur_dir, '..', 'triangulation.txt'),
         os.path.join(cur_dir, '..', 'reference_points.txt'),
         os.path.join(cur_dir, '..', 'warped_points.txt'),
-        os.path.join(cur_dir, '..', '..', opt_parser.jpg_bg),
+        os.path.join("../../../examples_cartoon", PUPPET_DICT[DEMO_CH][1]),
         '-novsync -dump'))
     os.system('ffmpeg -y -r 62.5 -f image2 -i "%06d.tga" -i {} -pix_fmt yuv420p -vf "pad=ceil(iw/2)*2:ceil(ih/2)*2" -shortest {}'.format(
-        os.path.join(cur_dir, '..', '..', '..', 'examples', ain),
-        os.path.join(cur_dir, '..', 'out.mp4')
+        os.path.join("../../..", audio_folder, ain),
+        os.path.join(cur_dir, '..', f'av_{ain}.mp4')
     ))
