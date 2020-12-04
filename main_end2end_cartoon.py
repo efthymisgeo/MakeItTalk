@@ -21,10 +21,12 @@ ADD_NAIVE_EYE = False
 GEN_AUDIO = True
 GEN_FLS = True
 
-DEMO_CH = 'danbooru1'
+DEMO_CH = 'wilk.png'
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--jpg', type=str, default=DEMO_CH)
+parser.add_argument('--jpg', type=str, required=True, help='Puppet image name to animate (with filename extension), e.g. wilk.png')
+parser.add_argument('--jpg_bg', type=str, required=True, help='Puppet image background (with filename extension), e.g. wilk_bg.jpg')
+parser.add_argument('--out', type=str, default='out.mp4')
 
 parser.add_argument('--load_AUTOVC_name', type=str,
                     default='examples/ckpt/ckpt_autovc.pth')
@@ -37,10 +39,15 @@ parser.add_argument('--load_G_name', type=str,
 
 parser.add_argument('--amp_lip_x', type=float, default=2.0)
 parser.add_argument('--amp_lip_y', type=float, default=2.0)
+<<<<<<< HEAD
 parser.add_argument('--amp_pos', type=float, default=0.8)
 parser.add_argument('--reuse_train_emb_list', default=['45hn7-LXDX8']) 
 # other options
 #  ['E_kmpT-EfOg']) #  ['E_kmpT-EfOg']) # ['45hn7-LXDX8'])
+=======
+parser.add_argument('--amp_pos', type=float, default=0.5)
+parser.add_argument('--reuse_train_emb_list', type=str, nargs='+', default=[]) #  ['E_kmpT-EfOg']) #  ['E_kmpT-EfOg']) # ['45hn7-LXDX8'])
+>>>>>>> 5ba9815532ef818c1ef0ba92b03d098964e70074
 
 
 parser.add_argument('--add_audio_in', default=False, action='store_true')
@@ -69,17 +76,25 @@ parser.add_argument('--use_11spk_only', default=False, action='store_true')
 opt_parser = parser.parse_args()
 # import pdb; pdb.set_trace()
 
-DEMO_CH = opt_parser.jpg
+DEMO_CH = opt_parser.jpg.split('.')[0]
 
-shape_3d = np.loadtxt('examples_cartoon/{}_face_close_mouth.txt'.format(opt_parser.jpg))
+shape_3d = np.loadtxt('examples_cartoon/{}_face_close_mouth.txt'.format(DEMO_CH))
 
 ''' STEP 3: Generate audio data as input to audio branch '''
 au_data = []
+au_emb = []
 ains = glob.glob1('examples', '*.wav')
+ains = [item for item in ains if item is not 'tmp.wav']
 ains.sort()
 for ain in ains:
     os.system('ffmpeg -y -loglevel error -i examples/{} -ar 16000 examples/tmp.wav'.format(ain))
     shutil.copyfile('examples/tmp.wav', 'examples/{}'.format(ain))
+
+    # au embedding
+    from thirdparty.resemblyer_util.speaker_emb import get_spk_emb
+    me, ae = get_spk_emb('examples/{}'.format(ain))
+    au_emb.append(me.reshape(-1))
+
     print('Processing audio file', ain)
     c = AutoVC_mel_Convertor('examples')
     au_data_i = \
@@ -126,7 +141,10 @@ with open(os.path.join('examples', 'dump', 'random_val_gaze.pickle'), 'wb') as f
 from src.approaches.train_audio2landmark import Audio2landmark_model
 print('Running Audio to Landmark model')
 model = Audio2landmark_model(opt_parser, jpg_shape=shape_3d)
-model.test()
+if(len(opt_parser.reuse_train_emb_list) == 0):
+    model.test(au_emb=au_emb)
+else:
+    model.test(au_emb=None)
 print('finish gen fls')
 
 ''' STEP 5: de-normalize the output to the original image scale '''
@@ -192,6 +210,7 @@ for i in range(0,len(fls_names)):
                 os.path.join(output_dir, 'triangulation.txt'))
 
     os.remove(os.path.join('examples_cartoon', fls_names[i]))
+<<<<<<< HEAD
     # import pdb; pdb.set_trace()
     # if opt_parser.use_wine:
     print("ENtering wineeeeeee")
@@ -201,10 +220,20 @@ for i in range(0,len(fls_names)):
     # ==============================================
     print("---Using wine---")
     warp_exe = os.path.join(os.getcwd(), 'facewarp', 'facewarp.exe')
+=======
+
+    # ==============================================
+    # Step 4 : Vector art morphing (only work in WINDOWS)
+    # ==============================================
+    warp_exe = os.path.join(os.getcwd(), 'facewarp', 'facewarp.exe')
+    import os
+    
+>>>>>>> 5ba9815532ef818c1ef0ba92b03d098964e70074
     if (os.path.exists(os.path.join(output_dir, 'output'))):
         shutil.rmtree(os.path.join(output_dir, 'output'))
     os.mkdir(os.path.join(output_dir, 'output'))
     os.chdir('{}'.format(os.path.join(output_dir, 'output')))
+<<<<<<< HEAD
     print(f"The pwd is {os.getcwd()}")
 
     ##########################################################
@@ -253,3 +282,20 @@ for i in range(0,len(fls_names)):
             ain,
             os.path.join(output_dir, namename)
         ))
+=======
+    cur_dir = os.getcwd()
+    print(cur_dir)
+    
+    os.system('{} {} {} {} {} {}'.format(
+        warp_exe,
+        os.path.join(cur_dir, '..', '..', opt_parser.jpg),
+        os.path.join(cur_dir, '..', 'triangulation.txt'),
+        os.path.join(cur_dir, '..', 'reference_points.txt'),
+        os.path.join(cur_dir, '..', 'warped_points.txt'),
+        os.path.join(cur_dir, '..', '..', opt_parser.jpg_bg),
+        '-novsync -dump'))
+    os.system('ffmpeg -y -r 62.5 -f image2 -i "%06d.tga" -i {} -pix_fmt yuv420p -vf "pad=ceil(iw/2)*2:ceil(ih/2)*2" -shortest {}'.format(
+        os.path.join(cur_dir, '..', '..', '..', 'examples', ain),
+        os.path.join(cur_dir, '..', 'out.mp4')
+    ))
+>>>>>>> 5ba9815532ef818c1ef0ba92b03d098964e70074
