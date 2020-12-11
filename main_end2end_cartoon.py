@@ -45,14 +45,16 @@ parser.add_argument('--load_G_name', type=str,
 parser.add_argument('--amp_lip_x', type=float, default=2.0)
 parser.add_argument('--amp_lip_y', type=float, default=2.0)
 parser.add_argument('--amp_pos', type=float, default=0.5)
-parser.add_argument('--reuse_train_emb_list', type=str, nargs='+', default=[]) 
-#  ['E_kmpT-EfOg']) #  ['E_kmpT-EfOg']) # ['45hn7-LXDX8'])
+parser.add_argument('--reuse_train_emb_list', type=str, nargs='+', default=[])
+# spk1: ['45hn7-LXDX8']
+# spk2: ['E_kmpT-EfOg']
 
 
 parser.add_argument('--add_audio_in', default=False, action='store_true')
 parser.add_argument('--comb_fan_awing', default=False, action='store_true')
 parser.add_argument('--output_folder', type=str, default='av_cartoon')
 parser.add_argument('--audio_folder', type=str, default='audio_folder')
+parser.add_argument('--dump_folder', type=str, default='tmp/dump')
 
 #### NEW POSE MODEL
 parser.add_argument('--test_end2end', default=True, action='store_true')
@@ -72,15 +74,20 @@ parser.add_argument('--segment_batch_size', type=int, default=512, help='batch s
 parser.add_argument('--emb_coef', default=3.0, type=float)
 parser.add_argument('--lambda_laplacian_smooth_loss', default=1.0, type=float)
 parser.add_argument('--use_11spk_only', default=False, action='store_true')
+parser.add_argument('--cent_face', default=False, action='store_true')
+parser.add_argument('--close_mouth_ratio', default=0.99, type=float)
 
 opt_parser = parser.parse_args()
 
 DEMO_CH = opt_parser.jpg.split('.')[0]
 audio_folder = opt_parser.audio_folder
 output_folder = opt_parser.output_folder
+centerize_face = opt_parser.cent_face
+dump_folder = opt_parser.dump_folder
 
 check_directory_and_create(audio_folder)
 check_directory_and_create(output_folder)
+check_directory_and_create(dump_folder)
 
 shape_3d = \
     np.loadtxt(f'examples_cartoon/{DEMO_CH}_face_close_mouth.txt')
@@ -121,22 +128,22 @@ for au, info in au_data:
     rot_quat.append(np.zeros(shape=(au_length, 4)))
     anchor_t_shape.append(np.zeros(shape=(au_length, 68 * 3)))
 
-# remove previous pickles in audio_folfer/dump/
-if(os.path.exists(os.path.join(audio_folder, 'dump', 'random_val_fl.pickle'))):
-    os.remove(os.path.join(audio_folder, 'dump', 'random_val_fl.pickle'))
-if(os.path.exists(os.path.join(audio_folder, 'dump', 'random_val_fl_interp.pickle'))):
-    os.remove(os.path.join(audio_folder, 'dump', 'random_val_fl_interp.pickle'))
-if(os.path.exists(os.path.join(audio_folder, 'dump', 'random_val_au.pickle'))):
-    os.remove(os.path.join(audio_folder, 'dump', 'random_val_au.pickle'))
-if (os.path.exists(os.path.join(audio_folder, 'dump', 'random_val_gaze.pickle'))):
-    os.remove(os.path.join(audio_folder, 'dump', 'random_val_gaze.pickle'))
+# remove previous pickles from tmp/dump/ folder
+if(os.path.exists(os.path.join(dump_folder, 'random_val_fl.pickle'))):
+    os.remove(os.path.join(dump_folder, 'random_val_fl.pickle'))
+if(os.path.exists(os.path.join(dump_folder, 'random_val_fl_interp.pickle'))):
+    os.remove(os.path.join(dump_folder, 'random_val_fl_interp.pickle'))
+if(os.path.exists(os.path.join(dump_folder, 'random_val_au.pickle'))):
+    os.remove(os.path.join(dump_folder, 'random_val_au.pickle'))
+if (os.path.exists(os.path.join(dump_folder, 'random_val_gaze.pickle'))):
+    os.remove(os.path.join(dump_folder, 'random_val_gaze.pickle'))
 
-# store the new pickles in audio_folder/dump
-with open(os.path.join(audio_folder, 'dump', 'random_val_fl.pickle'), 'wb') as fp:
+# store the new pickles in tmp/dump folder
+with open(os.path.join(dump_folder, 'random_val_fl.pickle'), 'wb') as fp:
     pickle.dump(fl_data, fp)
-with open(os.path.join(audio_folder, 'dump', 'random_val_au.pickle'), 'wb') as fp:
+with open(os.path.join(dump_folder, 'random_val_au.pickle'), 'wb') as fp:
     pickle.dump(au_data, fp)
-with open(os.path.join(audio_folder, 'dump', 'random_val_gaze.pickle'), 'wb') as fp:
+with open(os.path.join(dump_folder, 'random_val_gaze.pickle'), 'wb') as fp:
     gaze = {'rot_trans':rot_tran, 'rot_quat':rot_quat, 'anchor_t_shape':anchor_t_shape}
     pickle.dump(gaze, fp)
 
@@ -144,24 +151,30 @@ with open(os.path.join(audio_folder, 'dump', 'random_val_gaze.pickle'), 'wb') as
 ''' STEP 4: RUN audio->landmark network'''
 from src.approaches.train_audio2landmark import Audio2landmark_model
 print('Running Audio to Landmark model')
-model = Audio2landmark_model(opt_parser, jpg_shape=shape_3d)
+face_offset = None
+if centerize_face:
+    face_offset = np.array([.0, .8, .0])
+model = Audio2landmark_model(opt_parser,
+                             jpg_shape=shape_3d,
+                             face_offset=face_offset)
 if(len(opt_parser.reuse_train_emb_list) == 0):
-    model.test(au_emb=au_emb)
+    model.test(au_emb=au_emb, centerize_face=centerize_face)
 else:
-    model.test(au_emb=None)
+    model.test(au_emb=None, centerize_face=centerize_face)
 print('finish gen fls')
 
 ''' STEP 5: de-normalize the output to the original image scale '''
 print("Entering Stage 5 of de-normalization of the output to the original image scale")
 fls_names = glob.glob1(output_folder, 'pred_fls_*.txt')
 fls_names.sort()
+# import pdb; pdb.set_trace()
 
-
+ains = glob.glob1(audio_folder, '*.wav')
+ains.sort()
 for i in range(0,len(fls_names)):
-    ains = glob.glob1(audio_folder, '*.wav')
-    ains.sort()
     ain = ains[i]
     fl = np.loadtxt(os.path.join(output_folder, fls_names[i])).reshape((-1, 68,3))
+    # tmp_output_dir = os.path.join(output_folder, fls_names[i][:-4])
     output_dir = os.path.join(output_folder, fls_names[i][:-4])
     try:
         os.makedirs(output_dir)
@@ -187,6 +200,7 @@ for i in range(0,len(fls_names)):
     fls[:, 48*3:] = savgol_filter(fls[:, 48*3:], 11, 3, axis=0)
     fls = fls.reshape((-1, 68, 3))
 
+    # import pdb; pdb.set_trace()
     if (DEMO_CH in ['paint', 'mulaney', 'cartoonM', 'beer', 'color', 'JohnMulaney', 'vangogh', 'jm', 'roy', 'lineface']):
         r = list(range(0, 68))
         fls = fls[:, r, :]
@@ -219,15 +233,15 @@ for i in range(0,len(fls_names)):
     # Step 4 : Vector art morphing (only work in Linux)
     # ===================================================
     warp_exe = os.path.join(os.getcwd(), 'facewarp', 'facewarp.exe')
-    
+
     if (os.path.exists(os.path.join(output_dir, 'output'))):
         shutil.rmtree(os.path.join(output_dir, 'output'))
     os.mkdir(os.path.join(output_dir, 'output'))
     os.chdir('{}'.format(os.path.join(output_dir, 'output')))
     cur_dir = os.getcwd()
     print(cur_dir)
-    
-    import pdb; pdb.set_trace()
+
+    # import pdb; pdb.set_trace()
     os.system('{} {} {} {} {} {} {}'.format(
         "wine",
         warp_exe,
@@ -241,3 +255,6 @@ for i in range(0,len(fls_names)):
         os.path.join("../../..", audio_folder, ain),
         os.path.join(cur_dir, '..', f'av_{ain}.mp4')
     ))
+
+    # back to the root folder
+    os.chdir("{}".format(os.path.join(cur_dir, '../../../')))

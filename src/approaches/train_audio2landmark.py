@@ -23,7 +23,10 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class Audio2landmark_model():
 
-    def __init__(self, opt_parser, jpg_shape=None):
+    def __init__(self, opt_parser,
+                 jpg_shape=None,
+                 face_offset=None,
+                 close_mouth_ratio=0.99):
         '''
         Init model with opt_parser
         '''
@@ -32,16 +35,20 @@ class Audio2landmark_model():
         # Step 1 : load opt_parser
         self.opt_parser = opt_parser
         self.audio_examples = opt_parser.audio_folder
-        self.std_face_id = np.loadtxt('src/dataset/utils/STD_FACE_LANDMARKS.txt')
+        self.dump_folder = opt_parser.dump_folder
+        self.std_face_id = \
+            np.loadtxt('src/dataset/utils/STD_FACE_LANDMARKS.txt')
         if(jpg_shape is not None):
             self.std_face_id = jpg_shape
+        self.close_mouth_ratio = close_mouth_ratio
         self.std_face_id = self.std_face_id.reshape(1, 204)
         self.std_face_id = torch.tensor(self.std_face_id,
                                         requires_grad=False,
                                         dtype=torch.float).to(device)
+        self.face_offset = face_offset
 
         self.eval_data = \
-            Audio2landmark_Dataset(dump_dir=f'{self.audio_examples}/dump',
+            Audio2landmark_Dataset(dump_dir=self.dump_folder,
                                    dump_name='random',
                                    status='val',
                                    num_window_frames=18,
@@ -83,7 +90,7 @@ class Audio2landmark_model():
         self.anchor_t_shape = np.loadtxt('src/dataset/utils/STD_FACE_LANDMARKS.txt')
         self.anchor_t_shape = self.anchor_t_shape[self.t_shape_idx, :]
 
-        with open(os.path.join(self.audio_examples, 'dump', 'emb.pickle'), 'rb') as fp:
+        with open(os.path.join(self.dump_folder, 'emb.pickle'), 'rb') as fp:
             self.test_embs = pickle.load(fp)
 
         print('====================================')
@@ -211,18 +218,22 @@ class Audio2landmark_model():
                         # efthygeo: anything missing here?
                         continue
 
-                    # laod close mouth as std_face
+                    # load close mouth as std_face
                     input_face_id = self.std_face_id
 
                     fl_dis_pred_pos, input_face_id = \
-                        self.__train_face_and_pos__(inputs_fl_segments,
-                                                    inputs_au_segments,
-                                                    inputs_emb_segments,
-                                                    input_face_id)
+                        self.__train_face_and_pos__(
+                            inputs_fl_segments,
+                            inputs_au_segments,
+                            inputs_emb_segments,
+                            input_face_id,
+                            close_mouth_ratio=self.close_mouth_ratio)
 
-                    fl_dis_pred_pos = (fl_dis_pred_pos + input_face_id).data.cpu().numpy()
+                    fl_dis_pred_pos = \
+                        (fl_dis_pred_pos + input_face_id).data.cpu().numpy()
                     ''' solve inverse lip '''
-                    fl_dis_pred_pos = self.__solve_inverse_lip2__(fl_dis_pred_pos)
+                    fl_dis_pred_pos = \
+                        self.__solve_inverse_lip2__(fl_dis_pred_pos)
                     fls_pred_pos_list += [fl_dis_pred_pos]
 
                 fake_fls_np = np.concatenate(fls_pred_pos_list)
@@ -243,7 +254,11 @@ class Audio2landmark_model():
                             self.std_face_id.detach().cpu().numpy().reshape((1, 68, 3)),
                             axis=1,
                             keepdims=True)
-                    #
+                    # this argument is originally added for the girl cartoon
+                    # girl_offset = np.array([0.0, 0.8, 0.0])
+                    if self.face_offset is not None:
+                        std_m += self.face_offset
+                    # import pdb; pdb.set_trace()
                     fake_fls_np = fake_fls_np.reshape((-1, 68, 3))
                     fake_fls_np = \
                         fake_fls_np \
@@ -299,9 +314,11 @@ class Audio2landmark_model():
                 idx = i
         return idx
 
-    def test(self, au_emb=None):
+    def test(self, au_emb=None, centerize_face=False):
         with torch.no_grad():
-            self.__train_pass__(au_emb, vis_fls=True)
+            self.__train_pass__(au_emb,
+                                vis_fls=True,
+                                centerize_face=centerize_face)
 
     def __solve_inverse_lip2__(self, fl_dis_pred_pos_numpy):
         for j in range(fl_dis_pred_pos_numpy.shape[0]):
